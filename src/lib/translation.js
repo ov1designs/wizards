@@ -1,5 +1,6 @@
 export default {
   en: {
+    startQuiz: "Start Quiz",
     welcomeTo: "Welcome to",
     pleaseLogin: "Please login to your account",
     loginFailed: "Login failed. Please check your credentials and try again",
@@ -42,6 +43,7 @@ export default {
     notStarted: "Not Started",
   },
   fr: {
+    startQuiz: "Commencer le quiz",
     welcomeTo: "Bienvenue à",
     pleaseLogin: "Veuillez vous connecter à votre compte",
     loginFailed:
@@ -85,6 +87,7 @@ export default {
     notStarted: "Non commencé",
   },
   it: {
+    startQuiz: "Commencer le quiz",
     welcomeTo: "Benvenuto su",
     pleaseLogin: "Effettua il login al tuo account",
     loginFailed: "Accesso fallito. Controlla le tue credenziali e riprova",
@@ -127,6 +130,7 @@ export default {
     notStarted: "Non iniziato",
   },
   ro: {
+    startQuiz: "Începe testul",
     welcomeTo: "Bine ai venit la",
     pleaseLogin: "Conectează-te la contul tău",
     loginFailed: "Conectare eșuată. Verifică-ți credențialele și încearcă din nou",

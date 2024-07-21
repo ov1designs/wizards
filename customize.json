@@ -1,10 +1,10 @@
 {
-  "name": "eCourse",
+  "name": "Interpreter Wizards",
   "logo": "/logo.svg",
-  "logo_size": 110,
+  "logo_size": 220,
 
   "colors": {
-    "main": "#158a8a",
-    "dark": "#040D12"
+    "main": "#6248FF",
+    "dark": "#281C6C"
   }
 }

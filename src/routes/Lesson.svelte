@@ -1,3 +1,4 @@
+
 <script>
   import { onMount, afterUpdate, tick } from "svelte";
   import { slide } from "svelte/transition";
@@ -12,6 +13,8 @@
     currentUser,
     fetchRecords,
     updateProgressStatus,
+    quizzes,
+    fetchQuizWithQuestions
   } from "../lib/pocketbase";
   import { cleanFileName } from "../lib/strConverter";
   import { navigate, useLocation } from "svelte-routing";
@@ -29,26 +32,42 @@
   import NotFound from "./NotFound.svelte";
   import Title from "../components/Title.svelte";
   import { t } from "../lib/i18n";
+  import Quiz from '../components/Quiz.svelte';
+  import AudioRecorder from '../components/AudioRecorder.svelte';
+
   export let lessonTitle;
+  export let lesson;
 
   let loading = {};
   let lessonVideo;
+  let currentLesson;
+  let currentCourse;
   let currentCourseStatus = "";
   let currentLessonTitle = "";
+  let currentQuiz;
+  let showQuiz = false;
 
   const lessonLocation = useLocation();
 
   onMount(async () => {
     if ($currentUser) {
       $isLoading = true;
-      await fetchRecords();
-      $isLoading = false;
+      try {
+        await fetchRecords();
+      } catch (error) {
+        showAlert("Failed to load lesson data. Please try again.", "fail");
+      } finally {
+        $isLoading = false;
+      }
     } else {
       navigate("/login");
     }
   });
 
   afterUpdate(() => {
+    if (lessonVideo) {
+      lessonVideo.destroy();
+    }
     lessonVideo = new Plyr("#lessonVideo", {
       invertTime: false,
       toggleInvert: false,
@@ -59,50 +78,43 @@
     });
   });
 
-  // find the current course status
   $: {
-    const currentLesson = $lessons.find(
+    currentLesson = $lessons.find(
       (lesson) =>
         slugify(lesson.title, { lower: true, strict: true }) ===
-        slugify(lessonTitle, { lower: true, strict: true }),
+        slugify(lessonTitle, { lower: true, strict: true })
     );
     if (currentLesson) {
       currentLessonTitle = currentLesson.title;
-      const currentCourse = $courses.find(
-        (course) => course.id === currentLesson.course,
+      currentCourse = $courses.find(
+        (course) => course.id === currentLesson.course
       );
       if (currentCourse) {
         const currentStatus = $progress.find(
-          (progressRecord) => progressRecord.course === currentCourse.id,
+          (progressRecord) => progressRecord.course === currentCourse.id
         );
         if (currentStatus) {
           currentCourseStatus = currentStatus.status;
         }
       }
+      currentQuiz = $quizzes.find(quiz => quiz.Lesson === currentLesson.id);  // Note the capital 'L' in 'Lesson'
+      console.log("Current quiz:", currentQuiz);
     }
   }
 
-  // function to get lessons of the current course
   function getCourseLessons(courseId) {
     return $lessons.filter((lesson) => lesson.course === courseId);
   }
 
-  // function to find the index of the current lesson within its course
   function findCurrentLessonIndex(courseLessons) {
     return courseLessons.findIndex(
       (lesson) =>
         slugify(lesson.title, { lower: true, strict: true }) ===
-        slugify(lessonTitle, { lower: true, strict: true }),
+        slugify(lessonTitle, { lower: true, strict: true })
     );
   }
 
-  // function to navigate to the next lesson within the same course
   function goToNextLesson() {
-    const currentLesson = $lessons.find(
-      (lesson) =>
-        slugify(lesson.title, { lower: true, strict: true }) ===
-        slugify(lessonTitle, { lower: true, strict: true }),
-    );
     if (currentLesson) {
       const courseLessons = getCourseLessons(currentLesson.course);
       const currentLessonIndex = findCurrentLessonIndex(courseLessons);
@@ -112,7 +124,7 @@
       ) {
         const nextLesson = courseLessons[currentLessonIndex + 1];
         navigate(
-          `/${slugify(nextLesson.title, { lower: true, strict: true })}`,
+          `/${slugify(nextLesson.title, { lower: true, strict: true })}`
         );
 
         const lessonsByCourse = getStoredLessons();
@@ -122,20 +134,14 @@
     }
   }
 
-  // function to navigate to the previous lesson within the same course
   function goToPreviousLesson() {
-    const currentLesson = $lessons.find(
-      (lesson) =>
-        slugify(lesson.title, { lower: true, strict: true }) ===
-        slugify(lessonTitle, { lower: true, strict: true }),
-    );
     if (currentLesson) {
       const courseLessons = getCourseLessons(currentLesson.course);
       const currentLessonIndex = findCurrentLessonIndex(courseLessons);
       if (currentLessonIndex > 0) {
         const previousLesson = courseLessons[currentLessonIndex - 1];
         navigate(
-          `/${slugify(previousLesson.title, { lower: true, strict: true })}`,
+          `/${slugify(previousLesson.title, { lower: true, strict: true })}`
         );
 
         const lessonsByCourse = getStoredLessons();
@@ -145,52 +151,72 @@
     }
   }
 
-  // function to complete a course and update the progress status to "Completed"
   async function completeCourse(lessonId) {
-    const currentLesson = $lessons.find(
-      (lesson) =>
-        slugify(lesson.title, { lower: true, strict: true }) ===
-        slugify(lessonTitle, { lower: true, strict: true }),
-    );
-    const currentCourse = $courses.find(
-      (course) => course.id === currentLesson.course,
-    );
-    const progressRecord = $progress.find(
-      (progressRecord) => progressRecord.course === currentCourse.id,
-    );
-
-    if (progressRecord.status === "In Progress") {
-      loading[lessonId] = true;
-      const updatedProgressRecord = await updateProgressStatus(
-        progressRecord.id,
-        "Completed",
+    if (currentLesson && currentCourse) {
+      const progressRecord = $progress.find(
+        (progressRecord) => progressRecord.course === currentCourse.id
       );
 
-      if (!updatedProgressRecord) {
-        loading[lessonId] = false;
-      }
+      if (progressRecord && progressRecord.status === "In Progress") {
+        loading[lessonId] = true;
+        try {
+          const updatedProgressRecord = await updateProgressStatus(
+            progressRecord.id,
+            "Completed"
+          );
 
-      if (updatedProgressRecord) {
-        await tick();
+          if (updatedProgressRecord) {
+            await tick();
 
-        $progress = $progress.map((progressRecord) => {
-          if (progressRecord.course === currentCourse.id) {
-            return { ...progressRecord, status: "Completed" };
+            $progress = $progress.map((record) => {
+              if (record.course === currentCourse.id) {
+                return { ...record, status: "Completed" };
+              }
+              return record;
+            });
+
+            navigate("/");
+
+            showAlert(
+              `${currentCourse.title.length > 30 ? currentCourse.title.slice(0, 30) + "..." : currentCourse.title} completed successfully`,
+              "success"
+            );
           }
-          return progressRecord;
-        });
-
-        loading[lessonId] = false;
-
-        navigate("/");
-
-        showAlert(
-          `${currentCourse.title.length > 30 ? currentCourse.title.slice(0, 30) + "..." : currentCourse.title} completed successfully`,
-          "success",
-        );
+        } catch (error) {
+          showAlert("Failed to complete course. Please try again.", "fail");
+        } finally {
+          loading[lessonId] = false;
+        }
       }
     }
   }
+
+  function startQuiz() {
+    if (currentQuiz) {
+      showQuiz = true;
+    }
+  }
+
+  function endQuiz() {
+  showQuiz = false;
+  showAlert("Congratulations! You've successfully completed the quiz.", "success");
+}
+
+  function handleReturnToMainCourse() {
+  if (currentCourse) {
+    navigate("/"); // This will navigate to the root route where your Courses component is rendered
+    showAlert(`Returned to My Courses`, "success");
+  } else {
+    showAlert("Unable to return to courses. Please try again.", "fail");
+  }
+}
+
+function handleSubmissionComplete(record) {
+    // Handle the successful submission, e.g., show a success message or update the UI
+    console.log('Submission complete:', record);
+  }
+
+
 </script>
 
 <Title title={currentLessonTitle} />
@@ -342,7 +368,7 @@
               {#if lesson.summary}
                 <div class="space-y-2">
                   <h3 class="flex items-center gap-2 text-base">
-                    <Icon icon="ph:text-align-left flex-shrink-0" />
+<Icon icon="ph:text-align-left flex-shrink-0" />
                     {$t("summary")}
                   </h3>
                   <p class="text-white/50">
@@ -352,98 +378,138 @@
               {/if}
             </div>
 
-            <div
-              class="flex w-full items-start justify-between gap-5 md:flex-col"
-            >
-              {#if $lesson_faqs.filter( (faq) => faq.lesson.includes(lesson.id), ).length > 0}
-                <div class="flex-1 space-y-4 md:w-full">
-                  <h2 class="flex items-center gap-2 text-base">
-                    <Icon class="flex-shrink-0" icon="ph:chats" />
-                    FAQs
-                  </h2>
-                  {#each $lesson_faqs as faq}
-                    {#if faq.lesson.includes(lesson.id)}
-                      <button
-                        on:click={() => (faq.isOpen = !faq.isOpen)}
-                        class="w-full space-y-2 rounded-md bg-white/10 p-2 outline outline-[1.5px] outline-white/20 transition hover:bg-white/20"
-                      >
-                        <div
-                          class="flex items-center justify-between gap-2 text-start"
-                        >
-                          <h3 class="line-clamp-1">
-                            {faq.question}
-                          </h3>
-                          <Icon
-                            class={faq.isOpen
-                              ? "flex-shrink-0 rotate-45 transition"
-                              : "flex-shrink-0 transition"}
-                            icon="ph:plus"
-                          />
-                        </div>
-                        {#if faq.isOpen}
-                          <p
-                            transition:slide={{
-                              duration: 250,
-                              easing: quintOut,
-                            }}
-                            class="text-start text-white/60"
-                          >
-                            {faq.answer}
-                          </p>
-                        {/if}
-                      </button>
-                    {/if}
-                  {/each}
-                </div>
+            {#if !showQuiz}
+              <!-- Lesson content (video, content, summary) remains here -->
+              
+              {#if currentQuiz}
+                <button
+                  on:click={startQuiz}
+                  class="mt-4 bg-main text-white px-4 py-2 rounded hover:bg-main/80 transition-colors flex items-center gap-2"
+                >
+                  <Icon class="flex-shrink-0" icon="ph:exam" />
+                  {$t("startQuiz")}
+                </button>
               {/if}
 
-              {#if $lesson_resources.filter( (resource) => resource.lesson.includes(lesson.id), ).length > 0}
-                <div class="flex-1 space-y-4 md:w-full">
-                  <h2 class="flex items-center gap-2 text-base">
-                    <Icon class="flex-shrink-0" icon="ph:link" />
-                    Resources
-                  </h2>
-                  {#each $lesson_resources as resource}
-                    {#if resource.lesson.includes(lesson.id)}
+              {#if lesson.has_audio_exercise}
+  <div class="mb-4">
+    <h3 class="text-xl font-semibold mb-2">Audio Exercise</h3>
+    <p class="mb-4">{lesson.audio_exercise_instructions}</p>
+    {#if lesson.doctor_audio}
+      {@const doctorAudioUrl = pb.files.getUrl(lesson, lesson.doctor_audio)}
+      <AudioRecorder 
+        lessonId={lesson.id}
+        doctorAudioUrl={doctorAudioUrl}
+        onSubmissionComplete={handleSubmissionComplete}
+      />
+    {:else}
+      <AudioRecorder 
+        lessonId={lesson.id}
+        onSubmissionComplete={handleSubmissionComplete}
+      />
+    {/if}
+  </div>
+{/if}
+
+              <!-- Existing FAQs, resources, and downloads sections remain here -->
+              <div
+                class="flex w-full items-start justify-between gap-5 md:flex-col"
+              >
+                {#if $lesson_faqs.filter( (faq) => faq.lesson.includes(lesson.id), ).length > 0}
+                  <div class="flex-1 space-y-4 md:w-full">
+                    <h2 class="flex items-center gap-2 text-base">
+                      <Icon class="flex-shrink-0" icon="ph:chats" />
+                      FAQs
+                    </h2>
+                    {#each $lesson_faqs as faq}
+                      {#if faq.lesson.includes(lesson.id)}
+                        <button
+                          on:click={() => (faq.isOpen = !faq.isOpen)}
+                          class="w-full space-y-2 rounded-md bg-white/10 p-2 outline outline-[1.5px] outline-white/20 transition hover:bg-white/20"
+                        >
+                          <div
+                            class="flex items-center justify-between gap-2 text-start"
+                          >
+                            <h3 class="line-clamp-1">
+                              {faq.question}
+                            </h3>
+                            <Icon
+                              class={faq.isOpen
+                                ? "flex-shrink-0 rotate-45 transition"
+                                : "flex-shrink-0 transition"}
+                              icon="ph:plus"
+                            />
+                          </div>
+                          {#if faq.isOpen}
+                            <p
+                              transition:slide={{
+                                duration: 250,
+                                easing: quintOut,
+                              }}
+                              class="text-start text-white/60"
+                            >
+                              {faq.answer}
+                            </p>
+                          {/if}
+                        </button>
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+
+                {#if $lesson_resources.filter( (resource) => resource.lesson.includes(lesson.id), ).length > 0}
+                  <div class="flex-1 space-y-4 md:w-full">
+                    <h2 class="flex items-center gap-2 text-base">
+                      <Icon class="flex-shrink-0" icon="ph:link" />
+                      Resources
+                    </h2>
+                    {#each $lesson_resources as resource}
+                      {#if resource.lesson.includes(lesson.id)}
+                        <a
+                      href={resource.link}
+                      target="_blank"
+                      class="block w-full rounded-md bg-white/10 p-2 outline outline-[1.5px] outline-white/20 transition hover:bg-white/20"
+                    >
+                          <div class="flex items-center justify-between gap-2">
+                            <h3 class="line-clamp-1">{resource.name}</h3>
+                            <Icon
+                              class="flex-shrink-0"
+                              icon="ph:arrow-up-right"
+                            />
+                          </div>
+                        </a>
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+
+                {#if lesson.downloads.length > 0}
+                  <div class="flex-1 space-y-4 md:w-full">
+                    <h2 class="flex items-center gap-2 text-base">
+                      <Icon class="flex-shrink-0" icon="ph:file" />
+                      {$t("downloads")}
+                    </h2>
+                    {#each lesson.downloads as download}
                       <a
-                        href={resource.link}
-                        target="_blank"
+                        href={pb.files.getUrl(lesson, download)}
+                        download
                         class="block w-full rounded-md bg-white/10 p-2 outline outline-[1.5px] outline-white/20 transition hover:bg-white/20"
                       >
                         <div class="flex items-center justify-between gap-2">
-                          <h3 class="line-clamp-1">{resource.name}</h3>
-                          <Icon
-                            class="flex-shrink-0"
-                            icon="ph:arrow-up-right"
-                          />
+                          <h3 class="line-clamp-1">{cleanFileName(download)}</h3>
+                          <Icon class="flex-shrink-0" icon="ph:download-simple" />
                         </div>
                       </a>
-                    {/if}
-                  {/each}
-                </div>
-              {/if}
-
-              {#if lesson.downloads.length > 0}
-                <div class="flex-1 space-y-4 md:w-full">
-                  <h2 class="flex items-center gap-2 text-base">
-                    <Icon class="flex-shrink-0" icon="ph:file" />
-                    {$t("downloads")}
-                  </h2>
-                  {#each lesson.downloads as download}
-                    <a
-                      href={pb.files.getUrl(lesson, download)}
-                      download
-                      class="block w-full rounded-md bg-white/10 p-2 outline outline-[1.5px] outline-white/20 transition hover:bg-white/20"
-                    >
-                      <div class="flex items-center justify-between gap-2">
-                        <h3 class="line-clamp-1">{cleanFileName(download)}</h3>
-                        <Icon class="flex-shrink-0" icon="ph:download-simple" />
-                      </div>
-                    </a>
-                  {/each}
-                </div>
-              {/if}
-            </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {:else}
+            <Quiz 
+  quizId={currentQuiz.id} 
+  on:endQuiz={endQuiz}
+/>
+            {/if}
           </section>
         {/if}
       {/each}

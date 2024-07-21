@@ -188,6 +188,7 @@
           <Icon class="flex-shrink-0 text-base" icon="ph:sign-out" />
         </button>
       </div>
+      
     {/if}
   </aside>
 {/if}
